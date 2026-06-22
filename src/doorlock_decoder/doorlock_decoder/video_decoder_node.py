@@ -2,12 +2,12 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from doorlock_sniper.msg import VideoPacket
+from std_msgs.msg import String  # 新增：订阅视频格式通知
 import av
 import cv2
 import threading
 import queue
 from pathlib import Path
-
 
 class VideoDecoderNode(Node):
     def __init__(self):
@@ -42,6 +42,7 @@ class VideoDecoderNode(Node):
         self.debug_dump_save_decoder = bool(self.get_parameter('debug_dump_save_decoder').value)
         self.debug_dump_dir = Path(str(self.get_parameter('debug_dump_dir').value)) / 'decoder'
         self.display_frame_counter = 0
+        
         if self.debug_dump_enable and self.debug_dump_save_decoder:
             self.debug_dump_dir.mkdir(parents=True, exist_ok=True)
             self.get_logger().info(
@@ -49,8 +50,9 @@ class VideoDecoderNode(Node):
             )
         elif self.debug_dump_enable:
             self.get_logger().warn('debug_dump_enable=true but debug_dump_save_decoder=false')
-
+        
         # 流式解码器状态
+        self.current_format = 'hevc'  # 默认优先HEVC（兼容SharkDataServer）
         self.codec = None
         self._reset_decoder(log=False, reason='startup')
         self.frame_count = 0
@@ -58,6 +60,14 @@ class VideoDecoderNode(Node):
         self.parsed_packet_count = 0
         self.gap_count = 0
         self.last_seq = None
+        
+        # 新增：订阅视频格式通知
+        self.format_sub = self.create_subscription(
+            String,
+            '/video_format',
+            self._format_change_callback,
+            QoSProfile(reliability=ReliabilityPolicy.RELIABLE, depth=10)
+        )
         
         # 显示队列
         if self.display:
@@ -80,27 +90,42 @@ class VideoDecoderNode(Node):
         )
         
         self.get_logger().info(f'Decoder started: subscribing to {topic}')
-
-    def _reset_decoder(self, *, log: bool = True, reason: str = ''):
-        self.codec = av.CodecContext.create('h264', 'r')
+        self.get_logger().info('Auto format switching enabled (default: HEVC)')
+    
+    def _reset_decoder(self, *, log: bool = True, reason: str = '', codec: str = None):
+        """重置解码器，支持指定编码格式"""
+        if codec is None:
+            codec = self.current_format
+            
+        self.codec = av.CodecContext.create(codec, 'r')
         self.codec.thread_type = 'FRAME'
         try:
-        # 新版本PyAV
+            # 低延迟标志
             self.codec.flags |= av.codec.context.Flags.LOW_LATENCY
+            self.codec.flags2 |= av.codec.context.Flags2.FAST
         except AttributeError:
-        # 如果都不存在，跳过低延迟标志设置（不影响基本解码功能）
             pass
+            
         if log:
-            self.get_logger().warn(f'Reset decoder ({reason})')
-
+            self.get_logger().warn(f'🔄 Reset decoder to {codec.upper()} ({reason})')
+    
+    def _format_change_callback(self, msg):
+        """接收桥接节点的格式通知，自动切换解码器"""
+        new_format = msg.data.lower()
+        if new_format not in ['h264', 'hevc']:
+            self.get_logger().warn(f'❌ Unknown video format: {new_format}, ignoring')
+            return
+            
+        if new_format != self.current_format:
+            self.current_format = new_format
+            self._reset_decoder(reason=f'format notification from bridge', codec=new_format)
+    
     def _handle_decoded_frame(self, frame):
         if frame is None or frame.width == 0 or frame.height == 0:
             return
-
         img = frame.to_ndarray(format='bgr24')
         if img is None or img.size == 0:
             return
-
         self.frame_count += 1
         if self.display:
             try:
@@ -111,34 +136,45 @@ class VideoDecoderNode(Node):
             self.get_logger().info(f'Decoded {self.frame_count} frames')
         
     def _packet_callback(self, msg):
-        """接收 300byte 分片，先 parse，再 decode。"""
+        """接收 300byte 分片，先 parse，再 decode。解码失败自动切换格式"""
         self.packet_count += 1
-
         # 丢包检测
         if self.last_seq is not None and msg.sequence_id != self.last_seq + 1:
             self.gap_count += 1
             self.get_logger().warn(
-                f'Gap detected: {self.last_seq} -> {msg.sequence_id}, reset decoder')
-            # 任意 300B 分片丢失都会破坏码流同步，直接重置等待下一组 SPS/PPS + IDR
+                f'⚠️ Gap detected: {self.last_seq} -> {msg.sequence_id}, reset decoder')
             self._reset_decoder(reason='sequence gap')
         self.last_seq = msg.sequence_id
-
         chunk = bytes(msg.data)
-
+        
         try:
             parsed_packets = self.codec.parse(chunk)
             self.parsed_packet_count += len(parsed_packets)
             for packet in parsed_packets:
                 for frame in self.codec.decode(packet):
                     self._handle_decoded_frame(frame)
+                    
         except av.AVError as e:
             self.get_logger().debug(f'Decode error: {e!s}')
-
+            # 解码失败自动切换格式（防止死循环，最多切换一次）
+            if not hasattr(self, '_last_switch_time'):
+                self._last_switch_time = 0
+                
+            if time.time() - self._last_switch_time > 5.0:  # 5秒内最多切换一次
+                self._last_switch_time = time.time()
+                if self.current_format == 'hevc':
+                    self.get_logger().info('🔄 HEVC decode failed, switching to H.264')
+                    self.current_format = 'h264'
+                else:
+                    self.get_logger().info('🔄 H.264 decode failed, switching to HEVC')
+                    self.current_format = 'hevc'
+                self._reset_decoder(reason='decode error auto-switch', codec=self.current_format)
+        
         if self.packet_count % 600 == 0:
             self.get_logger().info(
-                f'Rx packets={self.packet_count} parsed_h264={self.parsed_packet_count} '
-                f'decoded_frames={self.frame_count} gaps={self.gap_count}')
-
+                f'📊 Rx packets={self.packet_count} parsed_h264={self.parsed_packet_count} '
+                f'decoded_frames={self.frame_count} gaps={self.gap_count} format={self.current_format.upper()}')
+    
     def _display_loop(self):
         """独立线程显示"""
         cv2.namedWindow('Doorlock Decoder', cv2.WINDOW_NORMAL)
@@ -174,20 +210,17 @@ class VideoDecoderNode(Node):
                 break
         
         cv2.destroyAllWindows()
-
+    
     def _draw_overlay(self, img):
         """叠加准心与中心圆点。"""
         h, w = img.shape[:2]
-
         # 准心位置（相对画面中心可调）
         cx = max(0, min(w - 1, w // 2 + self.crosshair_offset_x))
         cy = max(0, min(h - 1, h // 2 + self.crosshair_offset_y))
-
         # 淡紫色准心（横竖贯穿全屏）
         crosshair_color = (230, 190, 235)  # BGR
         cv2.line(img, (0, cy), (w - 1, cy), crosshair_color, self.crosshair_width, cv2.LINE_AA)
         cv2.line(img, (cx, 0), (cx, h - 1), crosshair_color, self.crosshair_width, cv2.LINE_AA)
-
         # 画面正中心固定淡绿色小圆点（不可调）
         center_color = (170, 255, 170)  # BGR
         center = (w // 2, h // 2)
@@ -201,7 +234,6 @@ class VideoDecoderNode(Node):
                 pass
             self.display_thread.join(timeout=1.0)
         super().destroy_node()
-
 
 def main(args=None):
     rclpy.init(args=args)
