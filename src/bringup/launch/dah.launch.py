@@ -69,7 +69,7 @@ def generate_launch_description():
     
     declare_shark_ip_arg = DeclareLaunchArgument(
         'shark_ip',
-        default_value='172.20.10.3',
+        default_value='192.168.100.10',
         description='SharkDataServer服务器IP地址'
     )
     
