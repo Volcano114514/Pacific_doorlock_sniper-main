@@ -1,18 +1,14 @@
-# 【RM2026】部署模式低带宽落点图传 - 五大湖联合大学
+# 【RM2026】自定义客户端下部署模式低带宽落点图传 - 电科中山
 
 用于RoboMaster部署模式下英雄机器人观测落点用的低带宽图传。
-
-[演示视频](https://www.bilibili.com/video/BV12aDMBcEob)
-
-[RM社区 - 开源报告](https://bbs.robomaster.com/article/1883295) (如果加载不出来可能是在审核中)
 
 <img width="502" height="323" alt="视频封面" src="https://github.com/user-attachments/assets/a72e1683-be42-44d2-a3ae-7686517728fd" />
 
 ## 环境要求
 
 - Ubuntu Linux
-- ROS 2 kilted。 其他版本例如Humble可能要改一些QoS之类的API。
-- 海康相机的 MVS SDK。
+- ROS 2 Humble
+- 海康/大恒相机 MVS SDK。
 
 ## 安装依赖
 
@@ -51,3 +47,16 @@ ros2 launch bringup sniper.launch.py
 `sniper.launch.py`里面可以修改启动参数，比如图传分辨率，准星位置，dump图片用于调试，等等。详见文件内注释。
 
 本工程仅为一个演示工程，开发过程中使用了LLM作为辅助。欢迎大家基于这个思路开发更好的自定义客户端。
+
+
+## ubuntu配置ip
+’’’bash
+# 设置IPv4为手动模式，配置IP和子网掩码
+nmcli connection modify "有线连接 1" ipv4.method manual ipv4.addresses 192.168.12.2/24
+# 清空网关（直连不需要网关，避免路由冲突）
+nmcli connection modify "有线连接 1" ipv4.gateway ""
+# 关闭自动DNS
+nmcli connection modify "有线连接 1" ipv4.ignore-auto-dns yes
+# 重新激活连接，使配置立即生效
+nmcli connection up "有线连接 1"
+‘’’
