@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1280</width>
+    <height>720</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>RoboMaster 三路视频切换控制台</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout_ctrl">
+      <item>
+       <widget class="QLabel" name="label_switch">
+        <property name="text">
+         <string>视频源切换：</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="combo_video_source">
+        <item>
+         <property name="text">
+          <string>本地相机原生画面</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>UDP Shark 视频流</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>MQTT 裁判视频流</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="label_referee">
+        <property name="text">
+         <string>裁判实时数据</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout_main">
+      <item>
+       <widget class="QLabel" name="label_video">
+        <property name="minimumSize">
+         <size>
+          <width>960</width>
+          <height>540</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">background-color: rgb(30,30,30);</string>
+        </property>
+        <property name="alignment">
+         <set>Qt::AlignCenter</set>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QTextEdit" name="text_referee_data">
+        <property name="minimumSize">
+         <size>
+          <width>300</width>
+          <height>640</height>
+         </size>
+        </property>
+        <property name="readOnly">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar"/>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

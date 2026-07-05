@@ -24,6 +24,8 @@ setup(
         'console_scripts': [
             'decoder_node = doorlock_decoder.video_decoder_node:main',
             'shark_bridge_node = doorlock_decoder.shark_bridge_node:main',
+            'mqtt_custom_bridge_node = doorlock_decoder.mqtt_custom_bridge_node:main',
+            'full_referee_bridge_node = doorlock_decoder.mqtt_custom_bridge_node:main',  # 新增这行
         ],
     },
 )

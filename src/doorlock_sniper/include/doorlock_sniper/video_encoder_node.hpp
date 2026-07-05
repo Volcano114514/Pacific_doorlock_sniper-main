@@ -34,6 +34,9 @@ private:
     cv::Mat * roi_downsample = nullptr,
     cv::Mat * static_removed = nullptr);
   
+  // ========== 自定义图像处理统一入口 ==========
+  void apply_custom_process(cv::Mat & frame);
+
   void push_frame_to_gstreamer(const cv::Mat & frame);
   void pull_stream_and_packetize();
   
@@ -47,13 +50,13 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
   rclcpp::Publisher<doorlock_sniper::msg::VideoPacket>::SharedPtr packet_pub_;
   
-  // 统计与状态（调整顺序，与初始化列表一致）
-  uint64_t packet_sequence_id_ = 0;   // 移到这里，先声明
+  // 统计与状态（顺序与初始化列表一致）
+  uint64_t packet_sequence_id_ = 0;
   uint32_t frame_count_ = 0;
   
   // 显示线程
   std::thread display_thread_;
-  std::atomic<bool> display_running_;  // 后声明
+  std::atomic<bool> display_running_;
   
   std::mutex frame_mutex_;
   cv::Mat display_raw_frame_;
@@ -79,7 +82,7 @@ private:
   cv::Mat motion_erode_kernel_;
   cv::Mat motion_dilate_kernel_;
   
-  // 参数
+  // 基础编码参数
   int param_crop_size_ = 800;
   int param_output_size_ = 400;
   int param_output_fps_ = 60;
@@ -99,17 +102,27 @@ private:
   double param_bandwidth_window_s_ = 2.0;
   double param_max_tx_delay_s_ = 1.0;
   bool param_enable_display_ = true;
+  std::string param_input_topic_;
+  std::string param_x264_preset_ = "auto";
+
+  // Debug Dump 参数
   bool param_debug_dump_enable_ = false;
   int param_debug_dump_every_n_frames_ = 20;
   bool param_debug_dump_save_raw_ = true;
   bool param_debug_dump_save_roi_ = true;
   bool param_debug_dump_save_static_ = true;
   bool param_debug_dump_save_final_ = true;
-  std::string param_input_topic_;
-  std::string param_x264_preset_ = "auto";
   std::string param_debug_dump_dir_ = "sniper_debug_imgs";
+
+  // ========== 自定义图像处理参数 ==========
+  bool param_enable_custom_process_ = true;
+  bool param_draw_crosshair_ = true;
+  bool param_draw_roi_border_ = true;
+  bool param_draw_status_text_ = true;
+  bool param_binary_overlay_ = false;
+  int param_binary_threshold_ = 60;
 };
 
 } // namespace doorlock_sniper
 
-#endif
+#endif // DOORLOCK_SNIPER_VIDEO_ENCODER_NODE_HPP_
