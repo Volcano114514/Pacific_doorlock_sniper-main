@@ -1,87 +1,98 @@
 from launch import LaunchDescription
-from launch_ros.actions import Node
-from launch.substitutions import LaunchConfiguration
-from launch.actions import DeclareLaunchArgument
-from launch.conditions import IfCondition
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.conditions import IfCondition, LaunchConfigurationEquals
+from pathlib import Path
+
 
 def generate_launch_description():
-    # 声明可配置参数
-    camera_name_arg = DeclareLaunchArgument(
-        'camera_name', 
-        default_value='daheng_camera',
-        description='相机节点名称'
-    )
-    camera_info_url_arg = DeclareLaunchArgument(
-        'camera_info_url', 
-        default_value='/home/vision/Pacific_doorlock_sniper-main/src/daheng_camera/config/camera_6mm_MER2-160-227U3M.yaml.yaml',
-        description='相机标定文件路径（留空则使用默认内参）'
-    )
-    exposure_time_arg = DeclareLaunchArgument(
-        'exposure_time', 
-        default_value='10000.0',
-        description='曝光时间（微秒）'
-    )
-    gain_arg = DeclareLaunchArgument(
-        'gain', 
-        default_value='0.0',
-        description='增益（dB）'
-    )
-    use_sensor_qos_arg = DeclareLaunchArgument(
-        'use_sensor_data_qos', 
-        default_value='true',
-        description='是否使用传感器数据QoS（低延迟）'
-    )
-    log_level_arg = DeclareLaunchArgument(
-        'log_level', 
-        default_value='info',
-        description='日志级别：debug/info/warn/error/fatal'
-    )
-    # 启动图像查看器开关（默认不启动）
-    launch_viewer_arg = DeclareLaunchArgument(
-        'launch_viewer', 
-        default_value='true',
-        description='是否同时启动rqt_image_view查看图像'
+    launch_dir = Path(__file__).resolve().parent
+
+    # 全局参数
+    declare_uart_enable = DeclareLaunchArgument('uart_enable', default_value='False')
+    declare_uart_port = DeclareLaunchArgument('uart_port', default_value='/dev/ttyACM0')
+    declare_uart_baud = DeclareLaunchArgument('uart_baudrate', default_value='921600')
+    declare_use_camera = DeclareLaunchArgument('use_camera', default_value='False')
+    declare_debug_mode = DeclareLaunchArgument('debug_mode', default_value='False')
+    declare_separate_decoder = DeclareLaunchArgument('enable_separate_decoder', default_value='False')
+    declare_use_shark = DeclareLaunchArgument('use_shark', default_value='False')
+    declare_shark_ip = DeclareLaunchArgument('shark_ip', default_value='192.168.12.1')
+    declare_shark_port = DeclareLaunchArgument('shark_port', default_value='3334')
+    declare_shark_timeout = DeclareLaunchArgument('shark_frame_timeout_s', default_value='1.0')
+    declare_use_mqtt = DeclareLaunchArgument('use_mqtt', default_value='False')
+    declare_mqtt_ip = DeclareLaunchArgument('mqtt_server_ip', default_value='192.168.1')
+    declare_mqtt_port = DeclareLaunchArgument('mqtt_server_port', default_value='3333')
+    declare_robot_id = DeclareLaunchArgument('robot_id', default_value='102')
+    declare_use_qt = DeclareLaunchArgument('use_qt_gui', default_value='True')
+
+    # 相机+编码
+    encoder_camera_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(str(launch_dir / 'module_encoder_camera.launch.py')),
+        launch_arguments={'enable_separate_decoder': LaunchConfiguration('enable_separate_decoder')}.items(),
+        condition=LaunchConfigurationEquals('use_camera', 'True')
     )
 
-    # 相机节点
-    daheng_camera_node = Node(
-        package='daheng_camera',
-        executable='daheng_camera_node',
-        name=LaunchConfiguration('camera_name'),
-        output='screen',
-        parameters=[{
-            'camera_name': LaunchConfiguration('camera_name'),
-            'camera_info_url': LaunchConfiguration('camera_info_url'),
-            'use_sensor_data_qos': LaunchConfiguration('use_sensor_data_qos'),
-            'exposure_time': LaunchConfiguration('exposure_time'),
-            'gain': LaunchConfiguration('gain'),
-        }],
-        arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
-        # 仅保留必要的话题映射
-        remappings=[
-            ('image_raw', 'image_raw'),
-            ('camera_info', 'camera_info'),
-        ],
+    # Shark UDP图传核心
+    shark_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(str(launch_dir / 'module_shark.launch.py')),
+        launch_arguments={
+            'sh_ip': LaunchConfiguration('shark_ip'),
+            'sh_port': LaunchConfiguration('shark_port'),
+            'shark_frame_timeout_s': LaunchConfiguration('shark_frame_timeout_s'),
+            'enable_separate_decoder': LaunchConfiguration('enable_separate_decoder')
+        }.items(),
+        condition=LaunchConfigurationEquals('use_shark', 'True')
     )
 
-    # 图像查看器（需要安装 ros-humble-rqt-image-view）
-    image_viewer_node = Node(
-        package='rqt_image_view',
-        executable='rqt_image_view',
-        name='camera_viewer',
-        arguments=['/daheng_camera/image_raw'],
-        output='screen',
-        condition=IfCondition(LaunchConfiguration('launch_viewer'))
+    # MQTT
+    mqtt_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(str(launch_dir / 'module_mqtt.launch.py')),
+        launch_arguments={
+            'mqtt_server_ip': LaunchConfiguration('mqtt_server_ip'),
+            'mqtt_server_port': LaunchConfiguration('mqtt_server_port'),
+            'robot_id': LaunchConfiguration('robot_id'),
+            'enable_separate_decoder': LaunchConfiguration('enable_separate_decoder'),
+            'enable_video_stream': PythonExpression(["'False' if '", LaunchConfiguration('debug_mode'), "' == 'True' else 'True'"])
+        }.items(),
+        condition=LaunchConfigurationEquals('use_mqtt', 'True')
+    )
+
+    # 串口收发（UDP无关，保留）
+    uart_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(str(launch_dir / 'module_uart.launch.py')),
+        launch_arguments={
+            'uart_port': LaunchConfiguration('uart_port'),
+            'uart_baudrate': LaunchConfiguration('uart_baudrate'),
+            'enable_receive': LaunchConfiguration('debug_mode'),
+            'enable_send': PythonExpression(["'True' if '", LaunchConfiguration('use_camera'), "' == 'True' else 'False'"])
+        }.items(),
+        condition=LaunchConfigurationEquals('uart_enable', 'True')
+    )
+
+    # 串口解码器
+    uart_decoder_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(str(launch_dir / 'module_uart_decoder.launch.py')),
+        launch_arguments={'enable_separate_decoder': LaunchConfiguration('enable_separate_decoder')}.items(),
+        condition=LaunchConfigurationEquals('debug_mode', 'True')
+    )
+
+    # QT界面
+    qt_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(str(launch_dir / 'module_qt_gui.launch.py')),
+        condition=LaunchConfigurationEquals('use_qt', 'True')
     )
 
     return LaunchDescription([
-        camera_name_arg,
-        camera_info_url_arg,
-        exposure_time_arg,
-        gain_arg,
-        use_sensor_qos_arg,
-        log_level_arg,
-        launch_viewer_arg,
-        daheng_camera_node,
-        image_viewer_node,
+        declare_uart_enable, declare_uart_port, declare_uart_baud,
+        declare_use_camera, declare_debug_mode, declare_separate_decoder,
+        declare_use_shark, declare_shark_ip, declare_shark_port, declare_shark_timeout,
+        declare_use_mqtt, declare_mqtt_ip, declare_mqtt_port, declare_robot_id,
+        declare_use_qt,
+        encoder_camera_launch,
+        shark_launch,
+        mqtt_launch,
+        uart_launch,
+        uart_decoder_launch,
+        qt_launch
     ])

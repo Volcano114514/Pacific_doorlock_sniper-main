@@ -69,7 +69,7 @@ def generate_launch_description():
     
     declare_shark_ip_arg = DeclareLaunchArgument(
         'shark_ip',
-        default_value='192.168.100.10',
+        default_value='192.168.12.2',
         description='SharkDataServer服务器IP地址'
     )
     
@@ -201,6 +201,19 @@ def generate_launch_description():
         condition=LaunchConfigurationEquals('use_shark', 'True')
     )
 
+    custom_client_node = Node(
+        package='doorlock_decoder',
+        executable='custom_client_node',
+        name='custom_client',
+        parameters=[
+            {'mqtt_broker_ip': '192.168.12.1'},
+            {'mqtt_broker_port': 3333},
+            {'client_id': '101'}   # 根据实际机器人 ID 修改
+        ],
+        output='screen',
+        emulate_tty=True,
+    )
+
     return LaunchDescription([
         declare_uart_enable_arg,
         declare_uart_port_arg,
@@ -212,5 +225,6 @@ def generate_launch_description():
         encoder_container,
         decoder_node,
         uart_sender_node,
-        shark_bridge_node
+        shark_bridge_node,
+        custom_client_node
     ])

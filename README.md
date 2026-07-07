@@ -48,7 +48,6 @@ ros2 launch bringup sniper.launch.py
 
 本工程仅为一个演示工程，开发过程中使用了LLM作为辅助。欢迎大家基于这个思路开发更好的自定义客户端。
 
-
 ## ubuntu配置ip
 ’’’bash
 # 设置IPv4为手动模式，配置IP和子网掩码
@@ -60,3 +59,18 @@ nmcli connection modify "有线连接 1" ipv4.ignore-auto-dns yes
 # 重新激活连接，使配置立即生效
 nmcli connection up "有线连接 1"
 ‘’’
+'''
+"https://subingwen.cn/cpp/protobuf/#1-1-%E6%BA%90%E7%A0%81%E5%AE%89%E8%A3%85"
+'''
+
+daheng sdk luj
+
+
+- [daheng SDK](https://www.daheng-imaging.com/)
+位置：下载中心 -> 软件下载 -> Galaxy_Linux_CN-EN_32bits/64bits
+解压tar.gz后，用终端cd到文件夹路径，运行安装脚本 ./Galaxy_camera.run
+
+sudo apt install ros-humble-serial-driver
+sudo apt install ros-humble-asio-cmake-module
+sudo apt install ros-humble-serial-driver ros-humble-io-context ros-humble-asio-cmake-module ros-humble-udp-driver
+sudo apt install python3-paho-mqtt python3-protobuf

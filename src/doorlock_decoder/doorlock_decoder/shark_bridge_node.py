@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from doorlock_sniper.msg import VideoPacket
+from doorlock_sniper.msg import VideoPacketVar
 from std_msgs.msg import String
 import socket
 import struct
@@ -9,11 +9,17 @@ import threading
 import time
 from array import array
 
+# ==================== 官方协议固定常量 ====================
+UDP_MAX_PACKET_SIZE = 1400
+UDP_HEADER_SIZE = 8
+UDP_MAX_PAYLOAD = 1392
+# =========================================================
+
 class SharkToROS2Bridge(Node):
     def __init__(self):
         super().__init__('shark_to_ros2_bridge')
         
-        self.declare_parameter('shark_ip', '192.168.100.10')
+        self.declare_parameter('shark_ip', '192.168.12.1')
         self.declare_parameter('shark_port', 3334)
         self.declare_parameter('packet_size', 300)
         self.declare_parameter('frame_timeout_s', 1.5)
@@ -25,21 +31,29 @@ class SharkToROS2Bridge(Node):
         
         self.recv_packet_count = 0
         self.complete_frame_count = 0
+        self.lost_frame_count = 0
+        self.error_frame_count = 0
         self.frame_buffer = {}
         self.sequence_id = 0
         
         self.current_format = None
         self.format_pub = self.create_publisher(
-            String, '/video_format',
+            String, '/video_format/shark',
             QoSProfile(reliability=ReliabilityPolicy.RELIABLE, depth=10)
         )
         
-        qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=300)
-        self.packet_pub = self.create_publisher(VideoPacket, '/video_stream', qos)
+        # 高码率适配：增大发布队列深度
+        qos = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT, 
+            history=HistoryPolicy.KEEP_LAST, 
+            depth=500
+        )
+        # 使用变长消息发布UDP流
+        self.packet_pub = self.create_publisher(VideoPacketVar, '/video_stream/shark', qos)
         
-        # 独立接收Socket
         self.recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.recv_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.recv_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8*1024*1024)
         self.recv_sock.settimeout(0.1)
         self.recv_sock.bind(('0.0.0.0', self.shark_port))
         
@@ -49,7 +63,6 @@ class SharkToROS2Bridge(Node):
         self.receive_thread.start()
         self.cleanup_thread.start()
         
-        # 独立发送Socket发送触发包
         try:
             send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             send_sock.sendto(b'HELLO', (self.shark_ip, self.shark_port))
@@ -62,7 +75,8 @@ class SharkToROS2Bridge(Node):
     
     def _print_stats(self):
         self.get_logger().info(
-            f'Stats: {self.recv_packet_count} packets, {self.complete_frame_count} frames'
+            f'Stats: {self.recv_packet_count} pkts, {self.complete_frame_count} frames, '
+            f'lost: {self.lost_frame_count}, error: {self.error_frame_count}'
         )
     
     def _detect_format(self, data):
@@ -86,16 +100,20 @@ class SharkToROS2Bridge(Node):
     def _process_packet(self, data):
         self.recv_packet_count += 1
         
-        if len(data) < 8:
+        if len(data) > UDP_MAX_PACKET_SIZE:
+            self.get_logger().warn(f'Invalid packet size: {len(data)} bytes (max 1400), dropped')
+            return
+        if len(data) < UDP_HEADER_SIZE:
             return
         
-        # 8字节大端包头解析
         frame_id = struct.unpack('!H', data[0:2])[0]
         chunk_idx = struct.unpack('!H', data[2:4])[0]
         total_bytes = struct.unpack('!I', data[4:8])[0]
         payload = data[8:]
         
-        max_chunk = (total_bytes + 1023) // 1024
+        if total_bytes == 0 or total_bytes > 2*1024*1024:
+            return
+        max_chunk = (total_bytes + UDP_MAX_PAYLOAD - 1) // UDP_MAX_PAYLOAD
         if chunk_idx >= max_chunk:
             return
         
@@ -108,10 +126,19 @@ class SharkToROS2Bridge(Node):
                 msg.data = fmt
                 self.format_pub.publish(msg)
         
+        # 帧ID回绕处理
+        if len(self.frame_buffer) > 0:
+            existing_ids = list(self.frame_buffer.keys())
+            for eid in existing_ids:
+                if frame_id < 1000 and eid > 50000:
+                    del self.frame_buffer[eid]
+                    self.lost_frame_count += 1
+        
         if frame_id not in self.frame_buffer:
             self.frame_buffer[frame_id] = {
                 'chunks': {},
                 'total': total_bytes,
+                'max_chunk': max_chunk,
                 'received': 0,
                 'ts': time.time()
             }
@@ -119,13 +146,22 @@ class SharkToROS2Bridge(Node):
         frame = self.frame_buffer[frame_id]
         frame['ts'] = time.time()
         
-        if chunk_idx not in frame['chunks']:
-            frame['chunks'][chunk_idx] = payload
-            frame['received'] += len(payload)
+        if chunk_idx in frame['chunks']:
+            return
         
-        if frame['received'] >= frame['total']:
+        frame['chunks'][chunk_idx] = payload
+        frame['received'] += len(payload)
+        
+        # 收齐所有分片才发布，避免残缺帧
+        if len(frame['chunks']) == frame['max_chunk'] and frame['received'] >= frame['total']:
             sorted_keys = sorted(frame['chunks'].keys())
             complete_frame = b''.join([frame['chunks'][k] for k in sorted_keys])
+            
+            if len(complete_frame) != frame['total']:
+                self.error_frame_count += 1
+                del self.frame_buffer[frame_id]
+                return
+            
             self._publish_frame(complete_frame)
             self.complete_frame_count += 1
             del self.frame_buffer[frame_id]
@@ -134,12 +170,10 @@ class SharkToROS2Bridge(Node):
         chunk_size = self.packet_size
         for i in range(0, len(frame_data), chunk_size):
             chunk = frame_data[i:i+chunk_size]
-            msg = VideoPacket()
+            # 核心改进：变长消息，无需补0，直接发送原始码流
+            msg = VideoPacketVar()
             msg.sequence_id = self.sequence_id
             msg.timestamp_ns = self.get_clock().now().nanoseconds
-            # 核心修复：不足300字节末尾补0，满足固定长度断言
-            if len(chunk) < chunk_size:
-                chunk = chunk + b'\x00' * (chunk_size - len(chunk))
             msg.data = array('B', chunk)
             self.packet_pub.publish(msg)
             self.sequence_id += 1
@@ -164,8 +198,10 @@ class SharkToROS2Bridge(Node):
             expired = [fid for fid, f in self.frame_buffer.items() 
                        if now - f['ts'] > self.frame_timeout_s]
             for fid in expired:
-                self.get_logger().warn(f'Frame {fid} timed out')
+                self.lost_frame_count += 1
                 del self.frame_buffer[fid]
+            if len(expired) > 0:
+                self.get_logger().warn(f'{len(expired)} frames timed out, total lost: {self.lost_frame_count}')
             time.sleep(0.5)
     
     def destroy_node(self):
@@ -183,8 +219,11 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        if rclpy.ok():
+        try:
             node.destroy_node()
+        except Exception:
+            pass
+        if rclpy.ok():
             rclpy.shutdown()
 
 if __name__ == '__main__':

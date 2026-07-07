@@ -25,6 +25,7 @@ pkg_check_modules(GSTREAMER_APP REQUIRED gstreamer-app-1.0)
 # 生成消息接口
 rosidl_generate_interfaces(${PROJECT_NAME}
   msg/VideoPacket.msg
+  msg/VideoPacketVar.msg
   DEPENDENCIES std_msgs
 )
 

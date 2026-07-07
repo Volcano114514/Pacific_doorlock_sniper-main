@@ -22,7 +22,7 @@ find_package(compressed_image_transport REQUIRED)
 find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc)
 
 # 大恒SDK路径（确认这个路径正确）
-set(DAHENG_SDK_ROOT "/home/rm/Galaxy_Linux-x86_Gige-U3_32bits-64bits_2.4.2507.9231/Galaxy_camera")
+set(DAHENG_SDK_ROOT "/home/rm/Galaxy_Linux-x86_Gige-U3_32bits-64bits_2.6.2606.9251/Galaxy_camera")
 
 include_directories(
   include
