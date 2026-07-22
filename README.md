@@ -68,9 +68,9 @@ nmcli connection up "有线连接 1"
 colcon build
 
 source install/setup.bash
-ros2 launch bringup sniper.launch.py
+ros2 launch bringup module_qt_gui.launch.py
 ```
-`sniper.launch.py`里面可以修改启动参数，比如图传分辨率，准星位置，dump图片用于调试，等等。详见文件内注释。
+`module_qt_gui.launch.py`里面可以修改启动参数，比如图传分辨率，准星位置，dump图片用于调试，等等。详见文件内注释。
 
 本工程仅为一个演示工程，开发过程中使用了LLM作为辅助。欢迎大家基于这个思路开发更好的自定义客户端。
 
