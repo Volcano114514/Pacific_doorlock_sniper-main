@@ -10,7 +10,7 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
     this->setWindowTitle("Video Display");
-
+    last_img_time_ = rclcpp::Time(0, 0, RCL_ROS_TIME); // 初始化为 0
     // ROS节点
     node_ = rclcpp::Node::make_shared("qt_video_display");
 
@@ -62,10 +62,21 @@ void MainWindow::cb_custom(const sensor_msgs::msg::Image::SharedPtr msg)
     cv::Mat mat(msg->height, msg->width, CV_8UC3, msg->data.data());
     display_img = QImage(mat.data, mat.cols, mat.rows, mat.step, QImage::Format_RGB888).rgbSwapped();
     current_source = SOURCE_CUSTOM_VIDEO;
+    last_img_time_ = rclcpp::Time(msg->header.stamp);
 }
 
 void MainWindow::update_display()
 {
+    // 检查图像是否超时（超过 2 秒没收到新图，视为断流）
+    rclcpp::Time now = this->node_->now();
+    if (!display_img.isNull() && (now - last_img_time_).seconds() > 2.0)
+    {
+        display_img = QImage(); // 清空图像
+        ui->label_video->clear(); // 清空控件
+        ui->label_video->setText("No Signal (Custom)"); // 显示提示文字（可选）
+        return;
+    }
+    
     if (!display_img.isNull())
     {
         ui->label_video->setPixmap(QPixmap::fromImage(display_img.scaled(
