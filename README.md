@@ -1,4 +1,4 @@
-# 【RM2026】自定义客户端 - 电科中山
+# 【RM2026】浅放致盲-dkzs
 
 ## 环境要求
 
@@ -34,6 +34,11 @@ sudo apt install -y \
 
 ```bash
 rosdep install --from-paths src --ignore-src -r -y
+```
+
+### 大恒SDK路径（去CMake找，确认这个路径正确）
+```bash
+set(DAHENG_SDK_ROOT "/home/rm/Galaxy_Linux-x86_Gige-U3_32bits-64bits_2.6.2606.9251/Galaxy_camera")
 ```
 
 ## ubuntu配置ip
