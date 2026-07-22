@@ -77,6 +77,12 @@ ros2 launch bringup module_qt_gui.launch.py
 ```
 `module_qt_gui.launch.py`里面可以修改启动参数，比如图传分辨率，准星位置，dump图片用于调试，等等。详见文件内注释。
 
+## 主目录进入.bashrc，添加环境变量，后面就不用source了
+```bash
+gedit .bashrc
+source ~/Pacific_doorlock_sniper-main/install/setup.bash
+```
+
 本工程仅为一个演示工程，开发过程中使用了LLM作为辅助。欢迎大家基于这个思路开发更好的自定义客户端。
 
 
