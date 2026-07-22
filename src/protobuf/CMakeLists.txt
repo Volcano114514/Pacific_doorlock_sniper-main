@@ -34,6 +34,9 @@ add_library(${PROJECT_NAME}_lib
   ${PROTO_SRCS}  # 必须添加自动生成的protobuf源文件
 )
 
+# MyTest.cpp includes a generated header, so make its generation order explicit.
+set_source_files_properties(src/MyTest.cpp PROPERTIES OBJECT_DEPENDS "${PROTO_HDRS}")
+
 ament_target_dependencies(${PROJECT_NAME}_lib
   rclcpp
   std_msgs

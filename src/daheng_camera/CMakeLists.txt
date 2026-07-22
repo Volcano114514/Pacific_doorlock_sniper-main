@@ -21,17 +21,34 @@ find_package(camera_info_manager REQUIRED)
 find_package(compressed_image_transport REQUIRED)
 find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc)
 
-# 大恒SDK路径（确认这个路径正确）
-set(DAHENG_SDK_ROOT "/home/rm/Galaxy_Linux-x86_Gige-U3_32bits-64bits_2.6.2606.9251/Galaxy_camera")
-
-include_directories(
-  include
-  ${DAHENG_SDK_ROOT}/inc
-  ${OpenCV_INCLUDE_DIRS}
+# 大恒 Galaxy SDK 不是系统/ROS 依赖，允许通过 CMake 参数或环境变量指定。
+set(DAHENG_SDK_ROOT "" CACHE PATH "Path to the Daheng Galaxy_camera SDK")
+find_path(DAHENG_INCLUDE_DIR
+  NAMES GxIAPI.h
+  HINTS "${DAHENG_SDK_ROOT}" ENV DAHENG_SDK_ROOT
+  PATH_SUFFIXES inc include include/daheng
 )
+find_library(DAHENG_GXIAPI_LIBRARY
+  NAMES gxiapi
+  HINTS "${DAHENG_SDK_ROOT}" ENV DAHENG_SDK_ROOT
+  PATH_SUFFIXES lib/64 lib/amd64 lib
+)
+
+if(NOT DAHENG_INCLUDE_DIR OR NOT DAHENG_GXIAPI_LIBRARY)
+  message(FATAL_ERROR
+    "Daheng Galaxy SDK not found. Set DAHENG_SDK_ROOT to the Galaxy_camera "
+    "directory (for example: colcon build --cmake-args "
+    "-DDAHENG_SDK_ROOT=/path/to/Galaxy_camera)."
+  )
+endif()
 
 # 🔴 关键：只编译一次组件库，同时自动生成可执行文件
 add_library(daheng_camera_component SHARED src/daheng_camera_node.cpp)
+target_include_directories(daheng_camera_component PRIVATE
+  include
+  "${DAHENG_INCLUDE_DIR}"
+  ${OpenCV_INCLUDE_DIRS}
+)
 ament_target_dependencies(daheng_camera_component
   rclcpp
   rclcpp_components
@@ -40,10 +57,9 @@ ament_target_dependencies(daheng_camera_component
   camera_info_manager
   compressed_image_transport
 )
-target_link_directories(daheng_camera_component PRIVATE ${DAHENG_SDK_ROOT}/lib/64)
 target_link_libraries(daheng_camera_component
   ${OpenCV_LIBRARIES}
-  gxiapi
+  "${DAHENG_GXIAPI_LIBRARY}"
 )
 
 # 🔴 关键：注册组件并自动生成可执行文件（一行解决main函数问题）

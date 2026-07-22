@@ -1,5 +1,5 @@
 #include "MyTest.h"
-#include "Person.pb.h"
+#include <Person.pb.h>
 // #include "Address.pb.h"
 
 void MyTest::test()
@@ -36,4 +36,3 @@ void MyTest::test()
 
     std::cout << pp.colcor() << std::endl;
 }
-

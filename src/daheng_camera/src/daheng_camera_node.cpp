@@ -57,17 +57,16 @@ public:
     }
 
     // ---------- 4. 获取传感器尺寸 ----------
-    GX_INT_VALUE int_val;
-    GXGetIntValue(device_handle_, "Width", &int_val);
-    img_width_ = int_val.nCurValue;
-    GXGetIntValue(device_handle_, "Height", &int_val);
-    img_height_ = int_val.nCurValue;
+    int64_t int_val = 0;
+    GXGetInt(device_handle_, GX_INT_WIDTH, &int_val);
+    img_width_ = int_val;
+    GXGetInt(device_handle_, GX_INT_HEIGHT, &int_val);
+    img_height_ = int_val;
     RCLCPP_INFO(this->get_logger(), "Sensor: %ld x %ld", img_width_, img_height_);
 
     // ---------- 5. 像素格式自适应 ----------
-    GX_ENUM_VALUE enum_val;
-    GXGetEnumValue(device_handle_, "PixelFormat", &enum_val);
-    int64_t fmt = enum_val.stCurValue.nCurValue;
+    int64_t fmt = 0;
+    GXGetEnum(device_handle_, GX_ENUM_PIXEL_FORMAT, &fmt);
     RCLCPP_INFO(this->get_logger(), "Default pixel format: 0x%lx", fmt);
 
     if (fmt == GX_PIXEL_FORMAT_BAYER_RG8) {
@@ -77,7 +76,7 @@ public:
       encoding_ = "mono8";
       raw_frame_size_ = img_width_ * img_height_;          // 原始数据：1 字节/像素
     } else {
-      if (GXSetEnumValue(device_handle_, "PixelFormat", GX_PIXEL_FORMAT_BAYER_RG8) == GX_STATUS_SUCCESS) {
+      if (GXSetEnum(device_handle_, GX_ENUM_PIXEL_FORMAT, GX_PIXEL_FORMAT_BAYER_RG8) == GX_STATUS_SUCCESS) {
         encoding_ = "bgr8";
         raw_frame_size_ = img_width_ * img_height_;
       } else {
@@ -88,15 +87,16 @@ public:
     }
 
     // ---------- 6. 通用采集设置 ----------
-    GXSetEnumValueByString(device_handle_, "AcquisitionMode", "Continuous");
-    GXSetEnumValueByString(device_handle_, "TriggerMode", "Off");
-    GXSetEnumValueByString(device_handle_, "ExposureAuto", "Off");
-    GXSetEnumValueByString(device_handle_, "GainAuto", "Off");
-    GXSetFloatValue(device_handle_, "ExposureTime", 10000.0);
-    GXSetFloatValue(device_handle_, "Gain", 0.0);
-    GXSetFloatValue(device_handle_, "AcquisitionFrameRate", 15.0);
-    GXSetEnumValue(device_handle_, "StreamBufferHandlingMode", GX_DS_STREAM_BUFFER_HANDLING_MODE_OLDEST_FIRST);
-    GXSetIntValue(device_handle_, "StreamBufferCount", 16);
+    GXSetEnum(device_handle_, GX_ENUM_ACQUISITION_MODE, GX_ACQ_MODE_CONTINUOUS);
+    GXSetEnum(device_handle_, GX_ENUM_TRIGGER_MODE, GX_TRIGGER_MODE_OFF);
+    GXSetEnum(device_handle_, GX_ENUM_EXPOSURE_AUTO, GX_EXPOSURE_AUTO_OFF);
+    GXSetEnum(device_handle_, GX_ENUM_GAIN_AUTO, GX_GAIN_AUTO_OFF);
+    GXSetFloat(device_handle_, GX_FLOAT_EXPOSURE_TIME, 10000.0);
+    GXSetFloat(device_handle_, GX_FLOAT_GAIN, 0.0);
+    GXSetFloat(device_handle_, GX_FLOAT_ACQUISITION_FRAME_RATE, 15.0);
+    GXSetEnum(device_handle_, GX_DS_ENUM_STREAM_BUFFER_HANDLING_MODE,
+             GX_DS_STREAM_BUFFER_HANDLING_MODE_OLDEST_FIRST);
+    GXSetAcqusitionBufferNumber(device_handle_, 16);
 
     // ---------- 7. 初始化ROS组件（先于回调启动，保证 now()/get_logger() 可用）----------
     bool use_qos = this->declare_parameter("use_sensor_data_qos", true);
@@ -277,6 +277,29 @@ private:
   }
 
   // ---------- 辅助函数 ----------
+  static bool parseWhiteBalanceMode(const std::string & mode, int64_t & value)
+  {
+    if (mode == "Off") {
+      value = GX_BALANCE_WHITE_AUTO_OFF;
+    } else if (mode == "Once") {
+      value = GX_BALANCE_WHITE_AUTO_ONCE;
+    } else if (mode == "Continuous") {
+      value = GX_BALANCE_WHITE_AUTO_CONTINUOUS;
+    } else {
+      return false;
+    }
+    return true;
+  }
+
+  static const char * whiteBalanceModeName(int64_t value)
+  {
+    switch (value) {
+      case GX_BALANCE_WHITE_AUTO_CONTINUOUS: return "Continuous";
+      case GX_BALANCE_WHITE_AUTO_ONCE: return "Once";
+      default: return "Off";
+    }
+  }
+
   void declareAndLoadCalibration()
   {
     camera_name_ = this->declare_parameter("camera_name", "daheng_camera");
@@ -299,52 +322,60 @@ private:
   void declareParameters()
   {
     rcl_interfaces::msg::ParameterDescriptor desc;
-    GX_FLOAT_VALUE fv;
+    GX_FLOAT_RANGE fv;
+    double current_value = 0.0;
 
     // ---------- 曝光时间 ----------
-    GXGetFloatValue(device_handle_, "ExposureTime", &fv);
+    GXGetFloatRange(device_handle_, GX_FLOAT_EXPOSURE_TIME, &fv);
+    GXGetFloat(device_handle_, GX_FLOAT_EXPOSURE_TIME, &current_value);
     desc.floating_point_range.resize(1);
     desc.floating_point_range[0].from_value = fv.dMin;
     desc.floating_point_range[0].to_value = fv.dMax;
     desc.floating_point_range[0].step = 0.0;
-    double expo = this->declare_parameter("exposure_time", fv.dCurValue, desc);
-    GXSetFloatValue(device_handle_, "ExposureTime", expo);
+    double expo = this->declare_parameter("exposure_time", current_value, desc);
+    GXSetFloat(device_handle_, GX_FLOAT_EXPOSURE_TIME, expo);
 
     // ---------- 增益 ----------
-    GXGetFloatValue(device_handle_, "Gain", &fv);
+    GXGetFloatRange(device_handle_, GX_FLOAT_GAIN, &fv);
+    GXGetFloat(device_handle_, GX_FLOAT_GAIN, &current_value);
     desc.floating_point_range[0].from_value = fv.dMin;
     desc.floating_point_range[0].to_value = fv.dMax;
-    double gain = this->declare_parameter("gain", fv.dCurValue, desc);
-    GXSetFloatValue(device_handle_, "Gain", gain);
+    double gain = this->declare_parameter("gain", current_value, desc);
+    GXSetFloat(device_handle_, GX_FLOAT_GAIN, gain);
 
-    GXSetEnumValueByString(device_handle_, "ExposureAuto", "Off");
-    GXSetEnumValueByString(device_handle_, "GainAuto", "Off");
+    GXSetEnum(device_handle_, GX_ENUM_EXPOSURE_AUTO, GX_EXPOSURE_AUTO_OFF);
+    GXSetEnum(device_handle_, GX_ENUM_GAIN_AUTO, GX_GAIN_AUTO_OFF);
 
     // ==================== 白平衡控制（直接尝试，兼容所有型号）====================
     // 1. 白平衡自动模式
-    GX_STATUS wb_status = GXSetEnumValueByString(device_handle_, "BalanceWhiteAuto", "Off");
+    GX_STATUS wb_status = GXSetEnum(device_handle_, GX_ENUM_BALANCE_WHITE_AUTO,
+                                    GX_BALANCE_WHITE_AUTO_OFF);
     if (wb_status == GX_STATUS_SUCCESS) {
-        std::string wb_mode = "Off";
-        GX_ENUM_VALUE wb_enum;
-        if (GXGetEnumValue(device_handle_, "BalanceWhiteAuto", &wb_enum) == GX_STATUS_SUCCESS) {
-            if (wb_enum.stCurValue.nCurValue == 1) wb_mode = "Continuous";
-            else if (wb_enum.stCurValue.nCurValue == 2) wb_mode = "Once";
-        }
+        int64_t wb_value = GX_BALANCE_WHITE_AUTO_OFF;
+        GXGetEnum(device_handle_, GX_ENUM_BALANCE_WHITE_AUTO, &wb_value);
+        std::string wb_mode = whiteBalanceModeName(wb_value);
         rcl_interfaces::msg::ParameterDescriptor wb_desc;
         wb_desc.description = "White balance auto mode: Off, Once, Continuous";
         this->declare_parameter("whitebalance_auto", wb_mode, wb_desc);
-        GXSetEnumValueByString(device_handle_, "BalanceWhiteAuto", wb_mode.c_str());
+        int64_t configured_wb_value = GX_BALANCE_WHITE_AUTO_OFF;
+        if (parseWhiteBalanceMode(this->get_parameter("whitebalance_auto").as_string(),
+                                  configured_wb_value)) {
+          GXSetEnum(device_handle_, GX_ENUM_BALANCE_WHITE_AUTO, configured_wb_value);
+        }
         RCLCPP_INFO(this->get_logger(), "White balance auto initialized: %s", wb_mode.c_str());
     } else {
         RCLCPP_INFO(this->get_logger(), "BalanceWhiteAuto not supported, skipping WB auto parameter.");
     }
 
         // 2. 手动白平衡比率（红/蓝）
-    GX_STATUS ratio_status = GXSetEnumValueByString(device_handle_, "BalanceRatioSelector", "Red");
+    GX_STATUS ratio_status = GXSetEnum(device_handle_, GX_ENUM_BALANCE_RATIO_SELECTOR,
+                                       GX_BALANCE_RATIO_SELECTOR_RED);
     if (ratio_status == GX_STATUS_SUCCESS) 
     {
-      GX_FLOAT_VALUE bf;
-      if (GXGetFloatValue(device_handle_, "BalanceRatio", &bf) == GX_STATUS_SUCCESS) 
+      GX_FLOAT_RANGE bf;
+      double ratio_value = 0.0;
+      if (GXGetFloatRange(device_handle_, GX_FLOAT_BALANCE_RATIO, &bf) == GX_STATUS_SUCCESS &&
+          GXGetFloat(device_handle_, GX_FLOAT_BALANCE_RATIO, &ratio_value) == GX_STATUS_SUCCESS)
       {
         // 声明红色比率参数
         rcl_interfaces::msg::ParameterDescriptor red_desc;
@@ -353,45 +384,45 @@ private:
         red_desc.floating_point_range[0].from_value = bf.dMin;
         red_desc.floating_point_range[0].to_value = bf.dMax;
         red_desc.floating_point_range[0].step = 0.0;
-        double red_ratio = this->declare_parameter("wb_red_ratio", bf.dCurValue, red_desc);
+        double red_ratio = this->declare_parameter("wb_red_ratio", ratio_value, red_desc);
         // 注意：声明后立即写入，但此时可能被 launch 覆盖，所以用 get_parameter 修正（下面会重写）
-        GXSetFloatValue(device_handle_, "BalanceRatio", red_ratio);
+        GXSetFloat(device_handle_, GX_FLOAT_BALANCE_RATIO, red_ratio);
 
         // 声明蓝色比率参数
-        GXSetEnumValueByString(device_handle_, "BalanceRatioSelector", "Blue");
-        GXGetFloatValue(device_handle_, "BalanceRatio", &bf);
+        GXSetEnum(device_handle_, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_BLUE);
+        GXGetFloat(device_handle_, GX_FLOAT_BALANCE_RATIO, &ratio_value);
         rcl_interfaces::msg::ParameterDescriptor blue_desc;
         blue_desc.description = "White balance blue ratio";
         blue_desc.floating_point_range.resize(1);
         blue_desc.floating_point_range[0].from_value = bf.dMin;
         blue_desc.floating_point_range[0].to_value = bf.dMax;
         blue_desc.floating_point_range[0].step = 0.0;
-        double blue_ratio = this->declare_parameter("wb_blue_ratio", bf.dCurValue, blue_desc);
-        GXSetFloatValue(device_handle_, "BalanceRatio", blue_ratio);
+        double blue_ratio = this->declare_parameter("wb_blue_ratio", ratio_value, blue_desc);
+        GXSetFloat(device_handle_, GX_FLOAT_BALANCE_RATIO, blue_ratio);
 
         // 声明绿色比率参数（新增）
-        GXSetEnumValueByString(device_handle_, "BalanceRatioSelector", "Green");
-        GXGetFloatValue(device_handle_, "BalanceRatio", &bf);
+        GXSetEnum(device_handle_, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_GREEN);
+        GXGetFloat(device_handle_, GX_FLOAT_BALANCE_RATIO, &ratio_value);
         rcl_interfaces::msg::ParameterDescriptor green_desc;
         green_desc.description = "White balance green ratio";
         green_desc.floating_point_range.resize(1);
         green_desc.floating_point_range[0].from_value = bf.dMin;
         green_desc.floating_point_range[0].to_value = bf.dMax;
         green_desc.floating_point_range[0].step = 0.0;
-        double green_ratio = this->declare_parameter("wb_green_ratio", bf.dCurValue, green_desc);
-        GXSetFloatValue(device_handle_, "BalanceRatio", green_ratio);
+        double green_ratio = this->declare_parameter("wb_green_ratio", ratio_value, green_desc);
+        GXSetFloat(device_handle_, GX_FLOAT_BALANCE_RATIO, green_ratio);
 
         // 上面声明时可能被 launch 覆盖，所以统一再读取一次并强制应用
         double red_final = this->get_parameter("wb_red_ratio").as_double();
         double blue_final = this->get_parameter("wb_blue_ratio").as_double();
         double green_final = this->get_parameter("wb_green_ratio").as_double();
         
-        GXSetEnumValueByString(device_handle_, "BalanceRatioSelector", "Red");
-        GXSetFloatValue(device_handle_, "BalanceRatio", red_final);
-        GXSetEnumValueByString(device_handle_, "BalanceRatioSelector", "Blue");
-        GXSetFloatValue(device_handle_, "BalanceRatio", blue_final);
-        GXSetEnumValueByString(device_handle_, "BalanceRatioSelector", "Green");
-        GXSetFloatValue(device_handle_, "BalanceRatio", green_final);
+        GXSetEnum(device_handle_, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_RED);
+        GXSetFloat(device_handle_, GX_FLOAT_BALANCE_RATIO, red_final);
+        GXSetEnum(device_handle_, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_BLUE);
+        GXSetFloat(device_handle_, GX_FLOAT_BALANCE_RATIO, blue_final);
+        GXSetEnum(device_handle_, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_GREEN);
+        GXSetFloat(device_handle_, GX_FLOAT_BALANCE_RATIO, green_final);
 
         RCLCPP_INFO(this->get_logger(), "Manual WB ratios: Red=%.3f, Blue=%.3f, Green=%.3f",
                     red_final, blue_final, green_final);
@@ -411,33 +442,41 @@ private:
 
     for (const auto& p : params) {
       if (p.get_name() == "exposure_time") {
-        if (GXSetFloatValue(device_handle_, "ExposureTime", p.as_double()) != GX_STATUS_SUCCESS) {
+        if (GXSetFloat(device_handle_, GX_FLOAT_EXPOSURE_TIME, p.as_double()) != GX_STATUS_SUCCESS) {
           res.successful = false;
           res.reason = "Failed to set exposure";
         }
       } else if (p.get_name() == "gain") {
-        if (GXSetFloatValue(device_handle_, "Gain", p.as_double()) != GX_STATUS_SUCCESS) {
+        if (GXSetFloat(device_handle_, GX_FLOAT_GAIN, p.as_double()) != GX_STATUS_SUCCESS) {
           res.successful = false;
           res.reason = "Failed to set gain";
         }
       }
       // ---------- 白平衡参数处理（新增） ----------
       else if (p.get_name() == "whitebalance_auto") {
-        if (GXSetEnumValueByString(device_handle_, "BalanceWhiteAuto", p.as_string().c_str()) != GX_STATUS_SUCCESS) {
+        int64_t wb_value = GX_BALANCE_WHITE_AUTO_OFF;
+        if (!parseWhiteBalanceMode(p.as_string(), wb_value) ||
+            GXSetEnum(device_handle_, GX_ENUM_BALANCE_WHITE_AUTO, wb_value) != GX_STATUS_SUCCESS) {
           res.successful = false;
           res.reason = "Failed to set BalanceWhiteAuto";
         }
       } else if (p.get_name() == "wb_red_ratio") {
-        GXSetEnumValueByString(device_handle_, "BalanceRatioSelector", "Red");
-        if (GXSetFloatValue(device_handle_, "BalanceRatio", p.as_double()) != GX_STATUS_SUCCESS) {
+        GXSetEnum(device_handle_, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_RED);
+        if (GXSetFloat(device_handle_, GX_FLOAT_BALANCE_RATIO, p.as_double()) != GX_STATUS_SUCCESS) {
           res.successful = false;
           res.reason = "Failed to set red balance ratio";
         }
       } else if (p.get_name() == "wb_blue_ratio") {
-        GXSetEnumValueByString(device_handle_, "BalanceRatioSelector", "Blue");
-        if (GXSetFloatValue(device_handle_, "BalanceRatio", p.as_double()) != GX_STATUS_SUCCESS) {
+        GXSetEnum(device_handle_, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_BLUE);
+        if (GXSetFloat(device_handle_, GX_FLOAT_BALANCE_RATIO, p.as_double()) != GX_STATUS_SUCCESS) {
           res.successful = false;
           res.reason = "Failed to set blue balance ratio";
+        }
+      } else if (p.get_name() == "wb_green_ratio") {
+        GXSetEnum(device_handle_, GX_ENUM_BALANCE_RATIO_SELECTOR, GX_BALANCE_RATIO_SELECTOR_GREEN);
+        if (GXSetFloat(device_handle_, GX_FLOAT_BALANCE_RATIO, p.as_double()) != GX_STATUS_SUCCESS) {
+          res.successful = false;
+          res.reason = "Failed to set green balance ratio";
         }
       }
       else {
